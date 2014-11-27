@@ -1,5 +1,6 @@
 import random
 import datetime
+import uuid
 
 regionsAndCities = { 
             'NE': ['Boston', 'NYC', 'Edison'], 
@@ -15,14 +16,15 @@ catsAndItems = {
                 'Cleaning Supplies' : ['Mops', 'Brooms', 'Detergents', 'Brushes', 'Sponge']
                 }
 
-header = ['id', 'insertTs', 'compId', 'region', 'storeGrp', 'storeId', 'segment', 'custId', 'channel', 
-          'campaignId', 'offerId', 'category', 'brandId', 'itemId', 'zoneId', 'posx',
+header = ['activityId', 'yrMonth', 'compId', 'region', 'storeGrp', 'storeId', 'segment', 'custId', 'channel', 
+          'campaignId', 'offerId', 'category', 'itemId', 'zoneId', 'posx',
           'posy', 'beaconId', 'lat', 'lng', 'iarTs', 'iarInd']
 
 segments = ['Gold', 'Premier', 'Affluent', 'Bronze', 'Loyal', 'GenY']
 channels = ['Email', 'Web', 'App']
 storeGroups = ['Inner City', 'Suburban', 'Mall', 'Urban', 'High Growth']
 compIds = [1000, 2000, 3000, 4000]
+mfgIds = [8000, 8010, 8020, 8030]
 activityInd = ['i', 'r', 'a']
 custSegMap = {}
 offerCampMap = {}
@@ -58,11 +60,15 @@ def getCompId():
     idx = random.randint(0, len(compIds)-1)
     return compIds[idx]
 
+def getMfgId():
+    idx = random.randint(0, len(mfgIds)-1)
+    return mfgIds[idx]
+
 def getStoreId(compId):
     return random.randint(compId, compId+999)
 
 def getCustomerId():
-    return random.randint(5000, 6000)
+    return random.randint(5000, 5010)
 
 def getChannel():
     idx = random.randint(0, len(channels)-1)
@@ -71,14 +77,14 @@ def getChannel():
 def getCampaignId(offerId):
     if offerCampMap.has_key(offerId):
         return offerCampMap[offerId]
-    campId = random.randint(100, 130)
+    campId = random.randint(100, 105)
     offerCampMap[offerId] = campId    
     return campId
     
 def getOfferId():
-    return random.randint(200, 350)
+    return random.randint(200, 210)
 
-# generates 2 timestamps .. 1 insert ts and second activity ts
+# generates YYYYMM second activity ts
 def generateTs():
     yr = random.randint(2001, 2014)
     mo = random.randint(1,12)
@@ -86,42 +92,71 @@ def generateTs():
     hr = random.randint(0,23)
     mn = random.randint(0,59)
     sec = random.randint(0,59)
-    sec1 = random.randint(0,59)
     ts = '{:%Y-%m-%dT%H:%M:%SZ}'.format(datetime.datetime(yr,mo,day,hr,mn,sec))
-    ts1 = '{:%Y-%m-%dT%H:%M:%SZ}'.format(datetime.datetime(yr,mo,day,hr,mn,sec1))
-    return (ts, ts1)
+    return (str(yr)+'-%02d' % mo, ts)
 
-header = ['id', 'insertTs', 'compId', 'region', 'storeGrp', 'storeId', 'segment', 'custId', 'channel', 
-          'campaignId', 'offerId', 'category', 'itemId', 'zoneId', 'posx',
-          'posy', 'beaconId', 'lat', 'lng', 'iarTs', 'iarInd']
+# Below is the cassandra table/solr docs that this script generates data for
+# -- Campaign data for retailer view, for brands, partitionkey would change to
+# -- ((yrMonth, cpgId), brandId, insertTs)
+# CREATE TABLE activity (
+# "activityId" TIMEUUID,
+# "yrMonth" VARCHAR,
+# "compId" VARCHAR,
+# "region" VARCHAR,
+# "storeGrp" VARCHAR,
+# "storeId" VARCHAR,
+# "campId" VARCHAR,
+# "offerId" VARCHAR,
+# "segment" VARCHAR,    
+# "custId" VARCHAR,
+# "channel" VARCHAR,
+# "mfgId" VARCHAR,    
+# "category" VARCHAR,
+# "itemId" VARCHAR,
+# "zoneId" INT,
+# "posx" FLOAT,
+# "posy" FLOAT,
+# "beaconId" INT,
+# "latlng" VARCHAR,
+# "iarInd" VARCHAR,
+# "activityTs" TIMESTAMP,
+# PRIMARY KEY (("yrMonth", "compId"), "storeId", "insertTs")
+# );
+  
+header = ['activityId', 'yrMonth', 'compId', 'region', 'storeGrp', 'storeId',  
+          'campId', 'offerId', 'segment', 'custId', 'channel','mfgId', 'category',  
+          'itemId', 'zoneId', 'posx', 'posy', 'beaconId', 'latlng', 'activityInd', 'activityTs']
 
-def generateData(outFile, numRecs):
+def generateData(outFile, numRecs, hdrFlg):
     counter = 0
     fw = open(outFile, 'w')
-    fw.write(','.join(header)+'\n')
+    print hdrFlg
+    if hdrFlg == 'Y':
+        fw.write(','.join(header)+'\n')
     while counter < numRecs:
         print "Writing row "+str(counter)
         flds = []
-        flds.append(str(counter))
-        ts, ts1 = generateTs()
-        flds.append(ts)
+        flds.append("\""+str(uuid.uuid1())+"\"")
+        yrMo, ts = generateTs()
+        flds.append("\""+yrMo+"\"")
         compId = getCompId();
-        flds.append(str(compId))
+        flds.append("\""+str(compId)+"\"")
         region = getRegion()
-        flds.append(region)
-        flds.append(getStoreGroup())
-        flds.append(str(getStoreId(compId)))
-        custId = getCustomerId()
-        flds.append(getSegment(custId))
-        flds.append(str(custId))
-        flds.append(getChannel())
-        offerId = getOfferId()
+        flds.append("\""+region+"\"")
+        flds.append("\""+getStoreGroup()+"\"")
+        flds.append("\""+str(getStoreId(compId))+"\"")
+        offerId = getOfferId()        
         campId = getCampaignId(offerId)    
-        flds.append(str(campId))
-        flds.append(str(offerId))
+        flds.append("\""+str(campId)+"\"")
+        flds.append("\""+str(offerId)+"\"")        
+        custId = getCustomerId()
+        flds.append("\""+getSegment(custId)+"\"")
+        flds.append("\""+str(custId)+"\"")
+        flds.append("\""+getChannel()+"\"")
+        flds.append("\""+str(getMfgId())+"\"")
         category = getCategory()
-        flds.append(category)
-        flds.append(getItem(category))
+        flds.append("\""+category+"\"")
+        flds.append("\""+getItem(category)+"\"")
         # zone id
         flds.append(str(random.randint(100,150)))
         # posx
@@ -131,19 +166,22 @@ def generateData(outFile, numRecs):
         #beaconid
         flds.append(str(random.randint(1,100)))
         # lat long
-        flds.append(str(random.randint(100,999)/10.0))
-        flds.append(str(random.randint(100,999)/10.0))
+#         flds.append(str(random.randint(100,999)/10.0))
+#         flds.append(str(random.randint(100,999)/10.0))
+        flds.append("\""+str(random.randint(100,999)/10.0)+","+str(random.randint(100,999)/10.0)+"\"")        
+        flds.append("\""+getActivity()+"\"")        
         # activity ts
-        flds.append(ts1)
-        flds.append(getActivity())
+        flds.append("\""+ts+"\"")
         fw.write(','.join(flds)+'\n')
         counter += 1
     fw.close()
+    print "Done!"
     
 if __name__=="__main__":
     from sys import argv
-    if (len(argv) < 3):
-        print "usage: GenerateDummyData <outFile> <numRecs>"
+    if (len(argv) < 4):
+        print "usage: GenerateDummyData <outFile> <numRecs> <header(default=Y)=Y|N>"
     else:
-        generateData(argv[1],int(argv[2]))
+        hdrFlg = 'Y' if argv[3] != 'N' else 'N'
+        generateData(argv[1],int(argv[2]), hdrFlg)
         
